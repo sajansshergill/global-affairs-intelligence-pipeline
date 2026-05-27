@@ -1,0 +1,99 @@
+version: "3.9"
+
+# ============================================================
+# GARIP — Docker Compose
+#
+# Services:
+#   garip-app       Streamlit dashboard (port 8501)
+#   garip-dagster   Dagster web UI + daemon (port 3000)
+#   garip-chromadb  ChromaDB vector store (port 8000)
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f garip-app
+#   docker compose down -v
+# ============================================================
+
+services:
+
+  # ── Streamlit Dashboard ──────────────────────────────────────
+  garip-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: garip-app:latest
+    container_name: garip-app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    environment:
+      - DUCKDB_PATH=/app/data/garip.duckdb
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+      - VECTOR_BACKEND=${VECTOR_BACKEND:-chromadb}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    command: streamlit run app/app.py --server.port=8501 --server.address=0.0.0.0
+    depends_on:
+      - garip-chromadb
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Dagster Orchestration ────────────────────────────────────
+  garip-dagster:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: garip-app:latest
+    container_name: garip-dagster
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+      - dagster-home:/root/.dagster
+    environment:
+      - DAGSTER_HOME=/root/.dagster
+      - DUCKDB_PATH=/app/data/garip.duckdb
+      - CHROMA_PERSIST_DIR=/app/data/chroma
+      - VECTOR_BACKEND=${VECTOR_BACKEND:-chromadb}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CONGRESS_API_KEY=${CONGRESS_API_KEY:-DEMO_KEY}
+      - REGULATIONS_GOV_API_KEY=${REGULATIONS_GOV_API_KEY:-DEMO_KEY}
+      - GARIP_INGEST_LIMIT=${GARIP_INGEST_LIMIT:-50}
+    command: dagster dev -f orchestration/dagster_pipeline.py -p 3000 -h 0.0.0.0
+    depends_on:
+      - garip-chromadb
+    restart: unless-stopped
+
+  # ── ChromaDB Vector Store ────────────────────────────────────
+  garip-chromadb:
+    image: chromadb/chroma:latest
+    container_name: garip-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  dagster-home:
+  chromadb-data:
+
+networks:
+  default:
+    name: garip-network
