@@ -62,6 +62,7 @@ class EURLexConnector:
     Fetches EU legislative acts via SPARQL — no API key required.
     """
 
+    session = None
     source_name = "eurlex"
     BASE_DOC_URL = "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:{celex}"
 
